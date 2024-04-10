@@ -9,32 +9,27 @@ import qualified Brick.AttrMap as A
 import Brick.BChan
 import Brick.Focus (focusGetCurrent)
 import qualified Brick.Focus as F
-import Brick.Main (App (..), ViewportScroll, halt)
-import Brick.Types (ViewportType (Both))
 import qualified Brick.Types as T
-import Brick.Widgets.Border (border, borderWithLabel, vBorder)
+import Brick.Widgets.Border (border)
 import qualified Brick.Widgets.Border as B
-import Brick.Widgets.Border.Style (unicode, unicodeRounded)
-import Brick.Widgets.Center (center, centerLayer)
+import Brick.Widgets.Border.Style (unicode)
+import Brick.Widgets.Center (centerLayer)
 import Brick.Widgets.Edit (getEditContents)
 import qualified Brick.Widgets.Edit as Edit
 import Control.Monad
 import Control.Monad.IO.Class (liftIO)
 import qualified Data.ByteString.Char8 as C
-import Data.Foldable (for_)
 import Data.Maybe (fromMaybe, maybeToList)
 import Data.Text (Text)
 import qualified Data.Text as Text
 import qualified Data.Text.IO as TIO
 import qualified Data.Text.Zipper.Generic.Words as TZ
-import Data.Traversable (for)
 import GHC.IO (evaluate, throwIO)
 import Graphics.Vty
 import qualified Graphics.Vty.Attributes as V
-import Graphics.Vty.Config
 import qualified Graphics.Vty.Input.Events as V
 import Graphics.Vty.Platform.Unix (mkVtyWithSettings)
-import Graphics.Vty.Platform.Unix.Settings (UnixSettings (UnixSettings, settingInputFd), VtyUnixConfigurationError (MissingTermEnvVar), defaultSettings)
+import Graphics.Vty.Platform.Unix.Settings (UnixSettings (UnixSettings, settingInputFd), VtyUnixConfigurationError (MissingTermEnvVar))
 import Lens.Micro
 import Lens.Micro.Mtl
 import Lens.Micro.TH
@@ -46,6 +41,7 @@ import System.Posix.IO.ByteString
 import System.Posix.Terminal
 import System.Posix.Types
 import System.Process (CreateProcess (..), StdStream (CreatePipe), createProcess, proc, waitForProcess)
+import System.FilePath (takeFileName)
 
 data Name
   = QueryEditor
@@ -53,7 +49,7 @@ data Name
   | RightView
   deriving (Eq, Ord, Show)
 
-data Executable = Executable {_exeFilePath :: FilePath, _exeArgs :: [String]} deriving (Show, Eq, Ord)
+data Executable = Executable {_exeFilePath :: !FilePath, _exeArgs :: ![String]} deriving (Show, Eq, Ord)
 
 makeLenses ''Executable
 
@@ -82,7 +78,7 @@ drawUI st = errorDialog ++ pure mainWidget
     errorDialog = maybeToList $ fmap (\errOutput -> centerLayer (border $ txt errOutput)) (st ^. lastError)
     mainWidget = withBorderStyle unicode $ queryPane <=> dualPane <=> statusBar <=> keysBar
     queryPane =
-      editIsFocused $ border $ txt "> " <+> F.withFocusRing (st ^. focusRing) (Edit.renderEditor (txt . Text.unlines)) (st ^. inputEditor)
+      editIsFocused $ border $ txt ((st ^. executable . exeFilePath . to (Text.pack . takeFileName) ) <> " > ") <+> F.withFocusRing (st ^. focusRing) (Edit.renderEditor (txt . Text.unlines)) (st ^. inputEditor)
 
     statusBar = txt $ fromMaybe " " (st ^. statusMessage)
     keysBar = txt "RET: execute | C-y: copy query | C-s: copy output | C-c: exit | M-Ret: commit to left side | M-Backspace: revert left side"
@@ -186,6 +182,7 @@ dispatchEvent ev = do
 appCursor :: St -> [CursorLocation Name] -> Maybe (CursorLocation Name)
 appCursor = F.focusRingCursor (^. focusRing)
 
+borderFocusAttr :: AttrName
 borderFocusAttr = attrName "borderFocused"
 
 theMap :: A.AttrMap
@@ -209,7 +206,7 @@ main :: IO ()
 main = do
   args <- getArgs
   let exe = case args of
-        executable : exeArgs -> Executable executable exeArgs
+        executable' : exeArgs' -> Executable executable' exeArgs'
         [] -> Executable "jq" []
   input <- TIO.getContents
   void $ evaluate input
