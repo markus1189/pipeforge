@@ -35,13 +35,13 @@ import Lens.Micro.Mtl
 import Lens.Micro.TH
 import System.Environment (getArgs, lookupEnv)
 import System.Exit (ExitCode (..))
+import System.FilePath (takeFileName)
 import System.Hclip (setClipboard)
 import System.IO
 import System.Posix.IO.ByteString
 import System.Posix.Terminal
 import System.Posix.Types
-import System.Process (CreateProcess (..), StdStream (CreatePipe), createProcess, proc, waitForProcess)
-import System.FilePath (takeFileName)
+import System.Process (CreateProcess (..), StdStream (CreatePipe), createProcess, proc, shell, waitForProcess)
 
 data Name
   = QueryEditor
@@ -55,6 +55,8 @@ makeLenses ''Executable
 
 data ProcessResult = ProcessSuccess !Text | ProcessFailure !Int !Text deriving (Eq, Ord, Show)
 
+data ProcessMode = SingleArgument | MultiArgument deriving (Eq, Ord, Show, Enum, Bounded)
+
 data St = St
   { _inputEditor :: !(Edit.Editor Text Name),
     _leftViewTxt :: !Text,
@@ -63,13 +65,14 @@ data St = St
     _lastError :: !(Maybe Text),
     _initialInput :: !Text,
     _statusMessage :: !(Maybe Text),
-    _executable :: !Executable
+    _executable :: !Executable,
+    _processMode :: !ProcessMode
   }
 
 makeLenses ''St
 
 mkSt :: Text -> Executable -> St
-mkSt input = St (Edit.editorText QueryEditor (Just 1) "") input "" (F.focusRing [QueryEditor, LeftView, RightView]) Nothing input Nothing
+mkSt input exe = St (Edit.editorText QueryEditor (Just 1) "") input "" (F.focusRing [QueryEditor, LeftView, RightView]) Nothing input Nothing exe MultiArgument
 
 drawUI :: St -> [Widget Name]
 drawUI st = errorDialog ++ pure mainWidget
@@ -78,7 +81,11 @@ drawUI st = errorDialog ++ pure mainWidget
     errorDialog = maybeToList $ fmap (\errOutput -> centerLayer (border $ txt errOutput)) (st ^. lastError)
     mainWidget = withBorderStyle unicode $ queryPane <=> dualPane <=> statusBar <=> keysBar
     queryPane =
-      editIsFocused $ border $ txt ((st ^. executable . exeFilePath . to (Text.pack . takeFileName) ) <> " > ") <+> F.withFocusRing (st ^. focusRing) (Edit.renderEditor (txt . Text.unlines)) (st ^. inputEditor)
+      editIsFocused $ border $ txt ((st ^. executable . exeFilePath . to (Text.pack . takeFileName)) <> indicator) <+> F.withFocusRing (st ^. focusRing) (Edit.renderEditor (txt . Text.unlines)) (st ^. inputEditor)
+      where
+        indicator = case st ^. processMode of
+          SingleArgument -> " > "
+          MultiArgument -> " >> "
 
     statusBar = txt $ fromMaybe " " (st ^. statusMessage)
     keysBar = txt "RET: execute | C-y: copy query | C-s: copy output | C-c: exit | M-Ret: commit to left side | M-Backspace: revert left side"
@@ -111,13 +118,20 @@ appEvent ev = do
     Nothing -> case ev of
       (T.VtyEvent (V.EvKey V.KBS [V.MMeta])) -> uncommitOutput
       (T.VtyEvent (V.EvKey V.KEnter [V.MMeta])) -> commitOutput
-      (T.VtyEvent (V.EvKey V.KEnter [])) -> use executable >>= executeProcess
+      (T.VtyEvent (V.EvKey V.KEnter [])) -> executeProcess
       (T.VtyEvent (V.EvKey (V.KChar 'c') [V.MCtrl])) -> halt
       (T.VtyEvent (V.EvKey (V.KChar '\t') [])) -> focusRing %= F.focusNext
       (T.VtyEvent (V.EvKey V.KBackTab [])) -> focusRing %= F.focusPrev
       (T.VtyEvent (V.EvKey (V.KChar 'y') [V.MCtrl])) -> copyQuery
       (T.VtyEvent (V.EvKey (V.KChar 's') [V.MCtrl])) -> copyOutput
+      (T.VtyEvent (V.EvKey (V.KChar 'q') [V.MCtrl])) -> toggleProcessMode
       _ -> dispatchEvent ev
+
+toggleProcessMode :: EventM Name St ()
+toggleProcessMode = processMode %= cycleNext
+
+cycleNext :: (Eq a, Enum a, Bounded a) => a -> a
+cycleNext x = if x == maxBound then minBound else succ x
 
 clearStatusMessage :: EventM Name St ()
 clearStatusMessage = statusMessage .= Nothing
@@ -146,12 +160,16 @@ uncommitOutput = do
   leftViewTxt .= initial
   invalidateCacheEntry LeftView
 
-executeProcess :: Executable -> EventM Name St ()
-executeProcess exe = do
+executeProcess :: EventM Name St ()
+executeProcess = do
+  exe <- use executable
+  processMode' <- use processMode
   argument <- use inputEditor <&> Text.intercalate "\n" . getEditContents
   input <- use initialInput
   processResult <- liftIO $ do
-    let processSpec = (proc (exe ^. exeFilePath) (exe ^. exeArgs ++ [Text.unpack argument])) {std_out = CreatePipe, std_in = CreatePipe, std_err = CreatePipe}
+    let processSpec = case processMode' of
+          SingleArgument -> (proc (exe ^. exeFilePath) (exe ^. exeArgs ++ [Text.unpack argument])) {std_out = CreatePipe, std_in = CreatePipe, std_err = CreatePipe}
+          MultiArgument -> (shell $ unwords $ (exe ^. exeFilePath) : (exe ^. exeArgs) ++ [Text.unpack argument]) {std_out = CreatePipe, std_in = CreatePipe, std_err = CreatePipe}
     (Just procStdin, Just procStdout, Just procStderr, ph) <- createProcess processSpec
     TIO.hPutStr procStdin input
     hClose procStdin
