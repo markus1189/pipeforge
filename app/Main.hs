@@ -72,7 +72,7 @@ data St = St
 makeLenses ''St
 
 mkSt :: Text -> Executable -> St
-mkSt input exe = St (Edit.editorText QueryEditor (Just 1) "") input "" (F.focusRing [QueryEditor, LeftView, RightView]) Nothing input Nothing exe MultiArgument
+mkSt input exe = St (Edit.editorText QueryEditor (Just 1) "") input "" (F.focusRing [QueryEditor, LeftView, RightView]) Nothing input Nothing exe SingleArgument
 
 drawUI :: St -> [Widget Name]
 drawUI st = errorDialog ++ pure mainWidget
