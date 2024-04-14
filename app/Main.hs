@@ -42,6 +42,7 @@ import System.Posix.IO.ByteString
 import System.Posix.Terminal
 import System.Posix.Types
 import System.Process (CreateProcess (..), StdStream (CreatePipe), createProcess, proc, shell, waitForProcess)
+import Data.Foldable (for_)
 
 data Name
   = QueryEditor
@@ -59,11 +60,11 @@ data ProcessMode = SingleArgument | MultiArgument deriving (Eq, Ord, Show, Enum,
 
 data St = St
   { _inputEditor :: !(Edit.Editor Text Name),
-    _leftViewTxt :: !Text,
+    _leftViewTxt :: !(Maybe Text),
     _rightViewTxt :: !Text,
     _focusRing :: !(F.FocusRing Name),
     _lastError :: !(Maybe Text),
-    _initialInput :: !Text,
+    _initialInput :: !(Maybe Text),
     _statusMessage :: !(Maybe Text),
     _executable :: !Executable,
     _processMode :: !ProcessMode
@@ -71,7 +72,7 @@ data St = St
 
 makeLenses ''St
 
-mkSt :: Text -> Executable -> St
+mkSt :: Maybe Text -> Executable -> St
 mkSt input exe = St (Edit.editorText QueryEditor (Just 1) "") input "" (F.focusRing [QueryEditor, LeftView, RightView]) Nothing input Nothing exe SingleArgument
 
 drawUI :: St -> [Widget Name]
@@ -90,7 +91,7 @@ drawUI st = errorDialog ++ pure mainWidget
     statusBar = txt $ fromMaybe " " (st ^. statusMessage)
     keysBar = txt "RET: execute | C-y: copy query | C-s: copy output | C-c: exit | M-Ret: commit to left side | M-Backspace: revert left side"
     dualPane =
-      leftIsFocused (border (withVScrollBars OnLeft $ viewport LeftView Both (txt (st ^. leftViewTxt))))
+      maybe emptyWidget (\x -> leftIsFocused (border (withVScrollBars OnLeft $ viewport LeftView Both (txt x)))) (st ^. leftViewTxt)
         <+> rightIsFocused (border (withVScrollBars OnRight $ viewport RightView Both (txt (st ^. rightViewTxt))))
     leftIsFocused = if focused == Just LeftView then overrideAttr B.borderAttr borderFocusAttr else id
     rightIsFocused = if focused == Just RightView then overrideAttr B.borderAttr borderFocusAttr else id
@@ -151,7 +152,7 @@ copyOutput = do
 commitOutput :: EventM Name St ()
 commitOutput = do
   r <- use rightViewTxt
-  leftViewTxt .= r
+  leftViewTxt ?= r
   invalidateCacheEntry LeftView
 
 uncommitOutput :: EventM Name St ()
@@ -171,7 +172,7 @@ executeProcess = do
           SingleArgument -> (proc (exe ^. exeFilePath) (exe ^. exeArgs ++ [Text.unpack argument])) {std_out = CreatePipe, std_in = CreatePipe, std_err = CreatePipe}
           MultiArgument -> (shell $ unwords $ (exe ^. exeFilePath) : (exe ^. exeArgs) ++ [Text.unpack argument]) {std_out = CreatePipe, std_in = CreatePipe, std_err = CreatePipe}
     (Just procStdin, Just procStdout, Just procStderr, ph) <- createProcess processSpec
-    TIO.hPutStr procStdin input
+    for_ input (TIO.hPutStr procStdin)
     hClose procStdin
     exitCode <- waitForProcess ph
     case exitCode of
@@ -222,11 +223,12 @@ theApp =
 
 main :: IO ()
 main = do
+  ready <- hReady stdin
   args <- getArgs
   let exe = case args of
         executable' : exeArgs' -> Executable executable' exeArgs'
         [] -> Executable "jq" []
-  input <- TIO.getContents
+  input <- if ready then Just <$> TIO.getContents else pure Nothing
   void $ evaluate input
   _ <- hClose stdin
   terminalName <- getControllingTerminalName
