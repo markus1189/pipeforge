@@ -19,7 +19,7 @@ import qualified Brick.Widgets.Edit as Edit
 import Control.Monad
 import Control.Monad.IO.Class (liftIO)
 import qualified Data.ByteString.Char8 as C
-import Data.Maybe (fromMaybe, maybeToList)
+import Data.Maybe (fromMaybe, maybeToList, isNothing)
 import Data.Text (Text)
 import qualified Data.Text as Text
 import qualified Data.Text.IO as TIO
@@ -67,13 +67,14 @@ data St = St
     _initialInput :: !(Maybe Text),
     _statusMessage :: !(Maybe Text),
     _executable :: !Executable,
-    _processMode :: !ProcessMode
+    _processMode :: !ProcessMode,
+    _inputHistory :: ![Text]
   }
 
 makeLenses ''St
 
 mkSt :: Maybe Text -> Executable -> St
-mkSt input exe = St (Edit.editorText QueryEditor (Just 1) "") input "" (F.focusRing [QueryEditor, LeftView, RightView]) Nothing input Nothing exe SingleArgument
+mkSt input exe = St (Edit.editorText QueryEditor (Just 1) "") input "" (F.focusRing [QueryEditor, LeftView, RightView]) Nothing input Nothing exe SingleArgument []
 
 drawUI :: St -> [Widget Name]
 drawUI st = errorDialog ++ pure mainWidget
@@ -89,7 +90,7 @@ drawUI st = errorDialog ++ pure mainWidget
           MultiArgument -> " >> "
 
     statusBar = txt $ fromMaybe " " (st ^. statusMessage)
-    keysBar = txt "RET: execute | C-y: copy query | C-s: copy output | C-c: exit | M-Ret: commit to left side | M-Backspace: revert left side"
+    keysBar = txt "RET: execute | C-y: copy command | C-s: copy output | C-c: exit | M-Ret: commit to left side | M-Backspace: revert left side"
     dualPane =
       maybe emptyWidget (\x -> leftIsFocused (border (withVScrollBars OnLeft $ viewport LeftView Both (txt x)))) (st ^. leftViewTxt)
         <+> rightIsFocused (border (withVScrollBars OnRight $ viewport RightView Both (txt (st ^. rightViewTxt))))
@@ -140,8 +141,12 @@ clearStatusMessage = statusMessage .= Nothing
 copyQuery :: EventM Name St ()
 copyQuery = do
   contents <- use inputEditor <&> Text.intercalate "\n" . getEditContents
-  liftIO $ setClipboard (Text.unpack contents)
-  statusMessage ?= "Query copied"
+  exePath <- use (executable . exeFilePath)
+  exeArgs' <- use (executable. exeArgs)
+  usesStdin <- use initialInput <&> isNothing
+  let prefix = if usesStdin then "| " else ""
+  liftIO $ setClipboard $ prefix ++ unwords (exePath : (exeArgs' ++ ['\'':Text.unpack (contents <> "'")]))
+  statusMessage ?= "Command copied"
 
 copyOutput :: EventM Name St ()
 copyOutput = do
@@ -152,6 +157,7 @@ copyOutput = do
 commitOutput :: EventM Name St ()
 commitOutput = do
   r <- use rightViewTxt
+  inputHistory %= (r:)
   leftViewTxt ?= r
 
 uncommitOutput :: EventM Name St ()
