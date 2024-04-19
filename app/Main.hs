@@ -153,13 +153,11 @@ commitOutput :: EventM Name St ()
 commitOutput = do
   r <- use rightViewTxt
   leftViewTxt ?= r
-  invalidateCacheEntry LeftView
 
 uncommitOutput :: EventM Name St ()
 uncommitOutput = do
   initial <- use initialInput
   leftViewTxt .= initial
-  invalidateCacheEntry LeftView
 
 executeProcess :: EventM Name St ()
 executeProcess = do
@@ -181,7 +179,7 @@ executeProcess = do
   case processResult of
     ProcessSuccess output -> do
       statusMessage ?= "Success"
-      rightViewTxt .= output >> invalidateCacheEntry RightView
+      rightViewTxt .= output
     ProcessFailure code output -> do
       statusMessage ?= ("Failed with code: " <> Text.pack (show code))
       lastError ?= output
