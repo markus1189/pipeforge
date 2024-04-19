@@ -111,7 +111,7 @@ drawUI st = errorDialog ++ pure mainWidget
           MultiArgument -> " >> "
 
     statusBar = txt $ fromMaybe " " (st ^. statusMessage)
-    keysBar = txt "RET: execute | C-y: copy command | C-s: copy output | C-c: exit | M-Ret: commit to left side | M-Backspace: revert left side"
+    keysBar = txt "RET: execute | C-q: toggle multi args | C-y: copy command | C-s: copy output | C-c: exit | M-Ret: commit to left side | M-Backspace: revert left side"
     dualPane =
       maybe emptyWidget (\x -> leftIsFocused (border (withVScrollBars OnLeft $ viewport LeftView Both (txt x)))) (st ^. leftViewTxt)
         <+> rightIsFocused (border (withVScrollBars OnRight $ viewport RightView Both (txt (st ^. rightViewTxt))))
