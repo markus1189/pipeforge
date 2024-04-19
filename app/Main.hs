@@ -113,11 +113,14 @@ drawUI st = errorDialog ++ pure mainWidget
     statusBar = txt $ fromMaybe " " (st ^. statusMessage)
     keysBar = txt "RET: execute | C-q: toggle multi args | C-y: copy command | C-s: copy output | C-c: exit | M-Ret: commit to left side | M-Backspace: revert left side"
     dualPane =
-      maybe emptyWidget (\x -> leftIsFocused (border (withVScrollBars OnLeft $ viewport LeftView Both (txt x)))) (st ^. leftViewTxt)
-        <+> rightIsFocused (border (withVScrollBars OnRight $ viewport RightView Both (txt (st ^. rightViewTxt))))
+      maybe emptyWidget (\x -> leftIsFocused (border (withVScrollBars OnLeft $ viewport LeftView Both (txt x)))) (st ^. leftViewTxt . to (fmap (Text.take maxTextLength)))
+        <+> rightIsFocused (border (withVScrollBars OnRight $ viewport RightView Both (txt (st ^. rightViewTxt . to (Text.take maxTextLength)))))
     leftIsFocused = if focused == Just LeftView then overrideAttr B.borderAttr borderFocusAttr else id
     rightIsFocused = if focused == Just RightView then overrideAttr B.borderAttr borderFocusAttr else id
     editIsFocused = if focused == Just QueryEditor then overrideAttr B.borderAttr borderFocusAttr else id
+
+maxTextLength :: Int
+maxTextLength = 999999
 
 vpEvent :: ViewportScroll Name -> T.BrickEvent Name e -> T.EventM Name x ()
 vpEvent vpScroll (T.VtyEvent (V.EvKey V.KDown [])) = vScrollBy vpScroll 1
