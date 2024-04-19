@@ -111,7 +111,7 @@ drawUI st = errorDialog ++ pure mainWidget
           MultiArgument -> " >> "
 
     statusBar = txt $ fromMaybe " " (st ^. statusMessage)
-    keysBar = txt "RET: execute | C-q: toggle multi args | C-y: copy command | C-s: copy output | C-c: exit | M-Ret: commit to left side | M-Backspace: revert left side"
+    keysBar = txt "RET: execute | C-q: toggle multi args | C-y: copy query | M-y: copy command | C-s: copy output | C-c: exit | M-Ret: commit to left side | M-Backspace: revert left side"
     dualPane =
       maybe emptyWidget (\x -> leftIsFocused (border (withVScrollBars OnLeft $ viewport LeftView Both (txt x)))) (st ^. leftViewTxt . to (fmap (Text.take maxTextLength)))
         <+> rightIsFocused (border (withVScrollBars OnRight $ viewport RightView Both (txt (st ^. rightViewTxt . to (Text.take maxTextLength)))))
@@ -149,6 +149,7 @@ appEvent ev = do
       (T.VtyEvent (V.EvKey (V.KChar '\t') [])) -> focusRing %= F.focusNext
       (T.VtyEvent (V.EvKey V.KBackTab [])) -> focusRing %= F.focusPrev
       (T.VtyEvent (V.EvKey (V.KChar 'y') [V.MCtrl])) -> copyQuery
+      (T.VtyEvent (V.EvKey (V.KChar 'y') [V.MMeta])) -> copyCommand
       (T.VtyEvent (V.EvKey (V.KChar 's') [V.MCtrl])) -> copyOutput
       (T.VtyEvent (V.EvKey (V.KChar 'q') [V.MCtrl])) -> toggleProcessMode
       _ -> dispatchEvent ev
@@ -164,6 +165,12 @@ clearStatusMessage = statusMessage .= Nothing
 
 copyQuery :: EventM Name St ()
 copyQuery = do
+  contents <- use inputEditor <&> Text.intercalate "\n" . getEditContents
+  liftIO $ setClipboard (Text.unpack contents)
+  statusMessage ?= "Query copied"
+
+copyCommand :: EventM Name St ()
+copyCommand = do
   contents <- use inputEditor <&> Text.intercalate "\n" . getEditContents
   exePath <- use (executable . exeFilePath)
   exeArgs' <- use (executable . exeArgs)
