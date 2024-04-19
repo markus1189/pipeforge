@@ -16,10 +16,12 @@ import Brick.Widgets.Border.Style (unicode)
 import Brick.Widgets.Center (centerLayer)
 import Brick.Widgets.Edit (getEditContents)
 import qualified Brick.Widgets.Edit as Edit
+import Control.Applicative (many, (<**>))
 import Control.Monad
 import Control.Monad.IO.Class (liftIO)
 import qualified Data.ByteString.Char8 as C
-import Data.Maybe (fromMaybe, maybeToList, isNothing)
+import Data.Foldable (for_)
+import Data.Maybe (fromMaybe, isNothing, maybeToList)
 import Data.Text (Text)
 import qualified Data.Text as Text
 import qualified Data.Text.IO as TIO
@@ -33,7 +35,9 @@ import Graphics.Vty.Platform.Unix.Settings (UnixSettings (UnixSettings, settingI
 import Lens.Micro
 import Lens.Micro.Mtl
 import Lens.Micro.TH
-import System.Environment (getArgs, lookupEnv)
+import Options.Applicative (Parser)
+import qualified Options.Applicative as OA
+import System.Environment (lookupEnv)
 import System.Exit (ExitCode (..))
 import System.FilePath (takeFileName)
 import System.Hclip (setClipboard)
@@ -42,17 +46,34 @@ import System.Posix.IO.ByteString
 import System.Posix.Terminal
 import System.Posix.Types
 import System.Process (CreateProcess (..), StdStream (CreatePipe), createProcess, proc, shell, waitForProcess)
-import Data.Foldable (for_)
+
+data Executable = Executable {_exeFilePath :: !FilePath, _exeArgs :: ![String]} deriving (Show, Eq, Ord)
+
+makeLenses ''Executable
+
+data PipeforgeArgs = PipeforgeArgs
+  { _argsNoInput :: !Bool,
+    _argsExecutable :: !Executable
+  }
+
+makeLenses ''PipeforgeArgs
+
+pipeforgeArgs :: Parser PipeforgeArgs
+pipeforgeArgs =
+  PipeforgeArgs
+    <$> OA.switch (OA.long "no-input" <> OA.help "Don't wait for input from stdin")
+    <*> exeParser
+  where
+    exeParser =
+      Executable
+        <$> OA.argument OA.str (OA.metavar "EXE")
+        <*> many (OA.argument OA.str (OA.metavar "EXE_ARGS"))
 
 data Name
   = QueryEditor
   | LeftView
   | RightView
   deriving (Eq, Ord, Show)
-
-data Executable = Executable {_exeFilePath :: !FilePath, _exeArgs :: ![String]} deriving (Show, Eq, Ord)
-
-makeLenses ''Executable
 
 data ProcessResult = ProcessSuccess !Text | ProcessFailure !Int !Text deriving (Eq, Ord, Show)
 
@@ -142,10 +163,10 @@ copyQuery :: EventM Name St ()
 copyQuery = do
   contents <- use inputEditor <&> Text.intercalate "\n" . getEditContents
   exePath <- use (executable . exeFilePath)
-  exeArgs' <- use (executable. exeArgs)
+  exeArgs' <- use (executable . exeArgs)
   usesStdin <- use initialInput <&> isNothing
   let prefix = if usesStdin then "| " else ""
-  liftIO $ setClipboard $ prefix ++ unwords (exePath : (exeArgs' ++ ['\'':Text.unpack (contents <> "'")]))
+  liftIO $ setClipboard $ prefix ++ unwords (exePath : (exeArgs' ++ ['\'' : Text.unpack (contents <> "'")]))
   statusMessage ?= "Command copied"
 
 copyOutput :: EventM Name St ()
@@ -157,7 +178,7 @@ copyOutput = do
 commitOutput :: EventM Name St ()
 commitOutput = do
   r <- use rightViewTxt
-  inputHistory %= (r:)
+  inputHistory %= (r :)
   leftViewTxt ?= r
 
 uncommitOutput :: EventM Name St ()
@@ -227,19 +248,16 @@ theApp =
 
 main :: IO ()
 main = do
-  ready <- hReady stdin
-  args <- getArgs
-  let exe = case args of
-        executable' : exeArgs' -> Executable executable' exeArgs'
-        [] -> Executable "jq" []
-  input <- if ready then Just <$> TIO.getContents else pure Nothing
+  args <- OA.execParser (OA.info (pipeforgeArgs <**> OA.helper) (OA.fullDesc <> OA.header "pipeforge - build pipelines incrementally"))
+  input <- if args ^. argsNoInput then pure Nothing else Just <$> TIO.getContents
   void $ evaluate input
   _ <- hClose stdin
+  -- hack to work with a closed stdin in brick
   terminalName <- getControllingTerminalName
   terminalFd <- openFd (C.pack terminalName) ReadOnly defaultFileFlags
   channel <- newBChan 42
   initialVty <- buildVty terminalFd
-  _ <- customMain initialVty (buildVty terminalFd) (Just channel) theApp (mkSt input exe)
+  _ <- customMain initialVty (buildVty terminalFd) (Just channel) theApp (mkSt input (args ^. argsExecutable))
   return ()
   where
     buildVty :: Fd -> IO Vty

@@ -13,14 +13,14 @@ Note: this is currently a rough personal prototype, enjoy responsibly
 
 ```
 # Arbitrary shell pipelines with e.g. bash
-seq 1 100 | nix run github:markus1189/pipeforge -- bash -c
+seq 1 100 | nix run github:markus1189/pipeforge -- bash -- -c
 
 # Build jq queries interactively
-echo '{"foo": 1}\n{"bar": 2}' | nix run github:markus1189/pipeforge -- jq --slurp
+echo '{"foo": 1}\n{"bar": 2}' | nix run github:markus1189/pipeforge -- jq -- --slurp
 
-# You need to toggle multi arg mode
+# You can toggle multi arg mode after starting, see keybindings
 echo '{"foo":{"bar":{"qux":{"quz":42}}}}' | nix run github:markus1189/pipeforge -- fx
 
 # Also works without any input
-nix run github:markus1189/pipeforge -- bash -c
+nix run github:markus1189/pipeforge -- --no-input bash -- -c
 ```

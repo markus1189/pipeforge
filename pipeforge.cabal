@@ -14,18 +14,19 @@ executable pipeforge
     import:           fatal-warnings
     main-is:          Main.hs
     build-depends:    base ^>=4.18.2.0
+                    , Hclip
                     , brick
-                    , vty >= 6.0
-                    , vty-unix
-                    , text
+                    , bytestring
+                    , filepath
                     , microlens
                     , microlens-mtl
                     , microlens-th
+                    , optparse-applicative
                     , process
-                    , unix
-                    , bytestring
-                    , Hclip
+                    , text
                     , text-zipper
-                    , filepath
+                    , unix
+                    , vty >= 6.0
+                    , vty-unix
     hs-source-dirs:   app
     default-language: Haskell2010
